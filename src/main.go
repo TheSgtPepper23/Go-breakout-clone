@@ -1,55 +1,88 @@
 package main
 
 import (
-	"math"
-
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
 const (
-	WIDHT   float32 = 800
-	HEIGHT  float32 = 600
-	DEG2RAD float64 = math.Pi / 180
+	WIDHT  float32 = 800
+	HEIGHT float32 = 600
 )
 
 type Ball struct {
 	position rl.Vector2
 	speedX   float32
 	speedY   float32
+	size     float32
 }
 
-func (b *Ball) calcBounceAngle() float64 {
-	return 75 * DEG2RAD * -1
+func (b *Ball) calcNewSpeed(player Player) {
+	b.position.Y = b.position.Y - 1
+	b.speedY *= -1
+
+	rightSide := b.position.X+(b.size/2) > player.position.X+(player.width/2)
+
+	if (b.speedX < 0 && rightSide) || (b.speedX > 0 && !rightSide) {
+		b.speedX *= -1
+	}
 }
 
-func (b *Ball) calcNewSpeed(angle float64) {
-	b.speedX = b.speedX * float32(math.Sin(angle))
-	b.speedY = -b.speedY * float32(math.Cos(angle))
+func (b Ball) getRect() rl.Rectangle {
+	return rl.NewRectangle(b.position.X, b.position.Y, b.size, b.size)
 }
 
 type Player struct {
 	position rl.Vector2
 	lives    int
-	speed    float32
-	width    int32
+	width    float32
 }
 
+func (p Player) getRect() rl.Rectangle {
+	return rl.NewRectangle(p.position.X, p.position.Y, p.width, 20)
+}
+
+type Brick struct {
+	position rl.Vector2
+	width    float32
+	height   float32
+	broken   bool
+}
+
+func (b Brick) getRect() rl.Rectangle {
+	return rl.NewRectangle(b.position.X, b.position.Y, b.width, b.height)
+}
+
+type BrickZone struct {
+	bricks []*Brick
+	zone   rl.Rectangle
+}
+
+type GAMESTATE int
+
+const (
+	GAMEOVER GAMESTATE = iota
+	PAUSE
+	GAMEON
+	GAMEREADY
+)
+
 type Game struct {
-	STATUS    int
-	player    Player
-	score     int32
-	ball      Ball
-	ballSpeed float32
+	brickSections []BrickZone
+	player        Player
+	STATUS        GAMESTATE
+	ball          Ball
+	score         int32
+	ballSpeed     float32
 }
 
 func initializeGame() Game {
+	brickZones := generateBricks(10, 5)
 	return Game{
 		player: Player{
 			position: rl.Vector2{
 				X: WIDHT / 2,
 				Y: 560,
 			},
-			speed: 400,
 			width: 80,
 		},
 		ball: Ball{
@@ -59,44 +92,98 @@ func initializeGame() Game {
 			},
 			speedX: 200,
 			speedY: 200,
+			size:   20,
 		},
+		STATUS:        GAMEREADY,
+		brickSections: brickZones,
 	}
 }
 
+func generateBricks(cols, rows int) []BrickZone {
+	brickWidth := WIDHT / float32(cols)
+	var brickHeight float32 = 30
+	brickZones := make([]BrickZone, 0)
+	var currentX float32 = 0.0
+	currentY := brickHeight * 2
+
+	for i := 0; i < rows; i++ {
+		bricksInZone := make([]*Brick, 0)
+		for j := 0; j < cols; j++ {
+			temp := Brick{
+				position: rl.Vector2{
+					X: currentX,
+					Y: currentY,
+				},
+				width:  brickWidth,
+				height: brickHeight,
+				broken: false,
+			}
+			bricksInZone = append(bricksInZone, &temp)
+			currentX += brickWidth
+		}
+		brickZones = append(brickZones, BrickZone{
+			zone:   rl.NewRectangle(0, currentY-5, WIDHT, brickHeight+10),
+			bricks: bricksInZone,
+		})
+		currentY += brickHeight
+		currentX = 0
+	}
+	return brickZones
+}
+
 func (g *Game) Update() {
-	delta := rl.GetFrameTime()
-
-	// player movement
-	if (rl.IsKeyDown(rl.KeyA) || rl.IsKeyDown(rl.KeyLeft)) && g.player.position.X > 0 {
-		g.player.position.X -= g.player.speed * delta
+	if rl.IsKeyPressed(rl.KeySpace) {
+		g.STATUS = GAMEON
 	}
+	if g.STATUS == GAMEON {
+		delta := rl.GetFrameTime()
+		mousePos := rl.GetMousePosition()
+		g.player.position.X = mousePos.X - g.player.width/2
+		// ball movement
+		g.ball.position.X += g.ball.speedX * delta
+		g.ball.position.Y += g.ball.speedY * delta
 
-	if (rl.IsKeyDown(rl.KeyD) || rl.IsKeyDown(rl.KeyRight)) && g.player.position.X+float32(g.player.width) < WIDHT {
-		g.player.position.X += g.player.speed * delta
-	}
+		// left wall collision
+		if g.ball.position.X <= 0 {
+			g.ball.position.X = 1
+			g.ball.speedX *= -1
+		}
 
-	// ball movement
-	g.ball.position.X += g.ball.speedX * delta
-	g.ball.position.Y += g.ball.speedY * delta
+		// rigth wall collision
+		if g.ball.position.X+g.ball.size >= WIDHT {
+			g.ball.position.X = WIDHT - g.ball.size
+			g.ball.speedX *= -1
+		}
 
-	if rl.CheckCollisionRecs(rl.NewRectangle(g.ball.position.X, g.ball.position.Y, 20, 20), rl.NewRectangle(g.player.position.X, g.player.position.Y, float32(g.player.width), 20)) {
-		angle := g.ball.calcBounceAngle()
-		g.ball.calcNewSpeed(angle)
-	}
+		// ceiling collision
+		if g.ball.position.Y <= 0 {
+			g.ball.position.Y = 1
+			g.ball.speedY *= -1
+		}
 
-	if g.ball.position.X <= 0 {
-		g.ball.position.X = 1
-		g.ball.speedX *= -1
-	}
+		// goes beyond the paddle
+		if g.ball.position.Y > g.player.position.Y+20 {
+			g.STATUS = GAMEOVER
+		}
 
-	if g.ball.position.X+20 >= WIDHT {
-		g.ball.position.X = WIDHT - 20
-		g.ball.speedX *= -1
-	}
+		// hits the paddle
+		if rl.CheckCollisionRecs(g.ball.getRect(), g.player.getRect()) {
+			// checks which side of the paddle hit
+			g.ball.calcNewSpeed(g.player)
+		}
 
-	if g.ball.position.Y <= 0 {
-		g.ball.position.Y = 1
-		g.ball.speedY *= -1
+		for _, brickZone := range g.brickSections {
+			if rl.CheckCollisionPointRec(rl.NewVector2(g.ball.position.X, g.ball.position.Y), brickZone.zone) ||
+				rl.CheckCollisionPointRec(rl.NewVector2(g.ball.position.X+g.ball.size, g.ball.position.Y+g.ball.size), brickZone.zone) {
+				for _, brick := range brickZone.bricks {
+					if !brick.broken && rl.CheckCollisionRecs(brick.getRect(), g.ball.getRect()) {
+						brick.broken = true
+						g.ball.calcNewSpeed(g.player)
+					}
+				}
+				break
+			}
+		}
 	}
 }
 
@@ -105,11 +192,22 @@ func (g *Game) Draw() {
 
 	rl.ClearBackground(rl.RayWhite)
 
+	for _, section := range g.brickSections {
+		for _, brick := range section.bricks {
+			if !brick.broken {
+				rl.DrawRectangleRec(brick.getRect(), rl.Yellow)
+				rl.DrawRectangleLines(int32(brick.position.X), int32(brick.position.Y), int32(brick.width), int32(brick.height), rl.Black)
+			}
+		}
+	}
+
+	rl.DrawFPS(0, 0)
+
 	// draw the player
-	rl.DrawRectangle(int32(g.player.position.X), int32(g.player.position.Y), g.player.width, 20, rl.Red)
+	rl.DrawRectangleRec(g.player.getRect(), rl.Red)
 
 	// draw the ball
-	rl.DrawRectangle(int32(g.ball.position.X), int32(g.ball.position.Y), 20, 20, rl.Blue)
+	rl.DrawRectangleRec(g.ball.getRect(), rl.Blue)
 	rl.EndDrawing()
 }
 
