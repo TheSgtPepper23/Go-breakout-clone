@@ -178,10 +178,11 @@ func (g *Game) Update() {
 				for _, brick := range brickZone.bricks {
 					if !brick.broken && rl.CheckCollisionRecs(brick.getRect(), g.ball.getRect()) {
 						brick.broken = true
+						g.ball.speedX *= 1.02
+						g.ball.speedY *= 1.02
 						g.ball.calcNewSpeed(g.player)
 					}
 				}
-				break
 			}
 		}
 	}
